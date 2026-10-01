@@ -1,0 +1,13 @@
+# Нормализация переводов строк
+* text=auto eol=lf
+
+# Пакетные файлы Windows обязаны быть в CRLF, иначе cmd.exe может
+# неправильно разобрать метки и goto
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Двоичные файлы
+*.png binary
+*.onnx binary
+*.wav binary

@@ -1,0 +1,74 @@
+[
+  {
+    "model": "medium",
+    "file": "de_real.wav",
+    "lang": "de",
+    "audio_s": 2.75,
+    "time_s": 12.6,
+    "rtf": 0.22,
+    "text": "Alles hat ein Ende. Nur die Wurst hat zwei."
+  },
+  {
+    "model": "medium",
+    "file": "en_real.wav",
+    "lang": "en",
+    "audio_s": 3.85,
+    "time_s": 12.76,
+    "rtf": 0.3,
+    "text": "Ask not what your country can do for you. Ask what you can do for your country."
+  },
+  {
+    "model": "medium",
+    "file": "jfk.wav",
+    "lang": "en",
+    "audio_s": 11.0,
+    "time_s": 13.73,
+    "rtf": 0.8,
+    "text": "And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country."
+  },
+  {
+    "model": "medium",
+    "file": "ru_real.wav",
+    "lang": "ru",
+    "audio_s": 11.29,
+    "time_s": 16.35,
+    "rtf": 0.69,
+    "text": "Ничьих не требуя похвал, Счастлив уж я надеждой сладкой, Что дева с трепетом любви Посмотрит, может быть, украдкой На песни грешные мои. У Лукомория дуб зеленый."
+  },
+  {
+    "model": "large-v3-turbo",
+    "file": "de_real.wav",
+    "lang": "de",
+    "audio_s": 2.75,
+    "time_s": 20.5,
+    "rtf": 0.13,
+    "text": "Alles hat ein Ende, nur die Wurst hat zwei."
+  },
+  {
+    "model": "large-v3-turbo",
+    "file": "en_real.wav",
+    "lang": "en",
+    "audio_s": 3.85,
+    "time_s": 20.15,
+    "rtf": 0.19,
+    "text": "Ask not what your country can do for you. Ask what you can do for your country."
+  },
+  {
+    "model": "large-v3-turbo",
+    "file": "jfk.wav",
+    "lang": "en",
+    "audio_s": 11.0,
+    "time_s": 20.38,
+    "rtf": 0.54,
+    "text": "And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country."
+  },
+  {
+    "model": "large-v3-turbo",
+    "file": "ru_real.wav",
+    "lang": "ru",
+    "audio_s": 11.29,
+    "time_s": 21.52,
+    "rtf": 0.52,
+    "text": "Ничьих не требуя похвал, Счастлив уж я надеждой сладкой, Что дева с трепетом любви Посмотрит, может быть, украдкой На песни грешные мои. У лукоморья дуб зеленый,"
+  }
+]

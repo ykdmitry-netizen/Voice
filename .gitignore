@@ -1,0 +1,20 @@
+# Служебные каталоги: библиотеки, модели и кэши не хранятся в репозитории
+pylibs/
+wheels/
+models/
+cache/
+audio/
+testhome/
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Локальные артефакты
+*.log
+*.tmp
+*.part
+build/
+dist/

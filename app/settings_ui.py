@@ -14,6 +14,33 @@ LANGUAGES = [("Русский", "ru"), ("English", "en"), ("Определять
 WHISPER_SIZES = ["tiny", "base", "small", "medium", "large-v3-turbo"]
 MODES = [("Удерживать клавиши", "hold"), ("Нажать — начать, нажать — стоп", "toggle")]
 
+HEAD_FONT = ("Segoe UI Semibold", 14)
+SUB_FONT = ("Segoe UI", 9)
+SECTION_FONT = ("Segoe UI Semibold", 10)
+
+
+def apply_theme(root: tk.Misc) -> None:
+    """Современная тема оформления вместо классических серых кнопок."""
+    style = ttk.Style(root)
+    try:
+        available = style.theme_names()
+    except tk.TclError:
+        return
+    for name in ("vista", "winnative", "xpnative", "clam"):
+        if name in available:
+            try:
+                style.theme_use(name)
+                break
+            except tk.TclError:
+                continue
+    style.configure(".", font=("Segoe UI", 9))
+    style.configure("TNotebook.Tab", padding=(14, 7))
+    style.configure("TButton", padding=(10, 5))
+    style.configure("TEntry", padding=4)
+    style.configure("Head.TLabel", font=HEAD_FONT)
+    style.configure("Sub.TLabel", font=SUB_FONT, foreground="#6b7280")
+    style.configure("Section.TLabel", font=SECTION_FONT)
+
 
 class SettingsWindow:
     def __init__(self, app) -> None:  # noqa: ANN001
@@ -23,26 +50,38 @@ class SettingsWindow:
         self._cancel_download = False
         self._test_running = False
 
+        apply_theme(app.root)
+
         self.win = tk.Toplevel(app.root)
         self.win.title("Pantela Voice — настройки")
         self.win.resizable(False, False)
         self.win.attributes("-topmost", True)
         self.win.protocol("WM_DELETE_WINDOW", self.close)
+        self.win.configure(bg="#f4f6fa")
+
+        head = ttk.Frame(self.win, padding=(16, 14, 16, 6))
+        head.pack(fill="x")
+        ttk.Label(head, text="Pantela Voice", style="Head.TLabel").pack(anchor="w")
+        ttk.Label(
+            head,
+            text="Локальная диктовка: звук не покидает компьютер",
+            style="Sub.TLabel",
+        ).pack(anchor="w")
 
         notebook = ttk.Notebook(self.win)
-        notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        notebook.pack(fill="both", expand=True, padx=14, pady=(6, 10))
+        self.notebook = notebook
 
         self._build_recognition(notebook)
         self._build_control(notebook)
         self._build_dictionary(notebook)
 
-        footer = ttk.Frame(self.win)
-        footer.pack(fill="x", padx=10, pady=(0, 10))
+        footer = ttk.Frame(self.win, padding=(14, 0, 14, 10))
+        footer.pack(fill="x")
         ttk.Button(footer, text="Сохранить", command=self.save).pack(side="right")
-        ttk.Button(footer, text="Закрыть", command=self.close).pack(side="right", padx=6)
-
-        self.status = ttk.Label(self.win, text="", foreground="#555")
-        self.status.pack(fill="x", padx=12, pady=(0, 8))
+        ttk.Button(footer, text="Закрыть", command=self.close).pack(side="right", padx=8)
+        self.status = ttk.Label(footer, text="", style="Sub.TLabel")
+        self.status.pack(side="left")
 
         self.refresh_model_status()
         self.win.deiconify()
@@ -72,9 +111,17 @@ class SettingsWindow:
 
         ttk.Label(frame, text="Whisper, размер").grid(row=1, column=0, sticky="w", pady=4)
         self.whisper_var = tk.StringVar(value=self.settings.whisper_model)
-        ttk.Combobox(
-            frame, state="readonly", width=42, values=WHISPER_SIZES, textvariable=self.whisper_var
-        ).grid(row=1, column=1, sticky="w", pady=4)
+        self.whisper_combo = ttk.Combobox(
+            frame, state="readonly", width=42, values=WHISPER_SIZES,
+            textvariable=self.whisper_var,
+        )
+        self.whisper_combo.grid(row=1, column=1, sticky="w", pady=4)
+        # значение задаём явно: не полагаемся на порядок инициализации виджета
+        self.whisper_combo.set(
+            self.settings.whisper_model
+            if self.settings.whisper_model in WHISPER_SIZES
+            else "small"
+        )
 
         ttk.Label(frame, text="Язык диктовки").grid(row=2, column=0, sticky="w", pady=4)
         self.lang_combo = ttk.Combobox(
@@ -227,16 +274,15 @@ class SettingsWindow:
         if engine == "whisper":
             self.model_status.configure(
                 text="Whisper скачает модель сам при первом использовании "
-                     f"({self.whisper_var.get()})."
+                     f"({self.whisper_combo.get()})."
             )
             self.download_btn.state(["disabled"])
             return
         self.download_btn.state(["!disabled"])
         missing = models.missing(self.settings.models_dir, engine)
+        folder = os.path.basename(models.engine_dir(self.settings.models_dir, engine))
         if not missing:
-            self.model_status.configure(
-                text=f"Модель на месте: {models.engine_dir(self.settings.models_dir, engine)}"
-            )
+            self.model_status.configure(text=f"Модель на месте: {folder}")
             self.download_btn.configure(text="Проверить целостность")
         else:
             size = models.total_size(engine) / 1e6
@@ -348,7 +394,7 @@ class SettingsWindow:
             engine_name = self._selected_engine()
             self._set_test("Распознаю…")
             engine = asr.build_engine(engine_name, self.settings.models_dir,
-                                      self.whisper_var.get())
+                                      self.whisper_combo.get())
             engine.load()
             text = engine.transcribe(samples, self.settings.language)
             self._set_test(f"Уровень {peak:.2f}. Распознано: {text or '(пусто)'}")
@@ -387,7 +433,7 @@ class SettingsWindow:
 
         new = Settings(
             engine=engine,
-            whisper_model=self.whisper_var.get() or old.whisper_model,
+            whisper_model=self.whisper_combo.get() or old.whisper_model,
             language=language,
             hotkey=self.hotkey_var.get().strip().lower() or old.hotkey,
             mode=self.mode_var.get(),

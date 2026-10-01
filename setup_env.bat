@@ -6,7 +6,7 @@ set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
 echo === Шаг 1/3: библиотеки ===
-py -3.12 "%ROOT%bench\fetch_deps.py" faster-whisper sherpa-onnx sounddevice pystray pillow || goto :fail
+py -3.12 "%ROOT%bench\fetch_deps.py" faster-whisper sherpa-onnx sounddevice pillow || goto :fail
 py -3.12 "%ROOT%bench\unpack_wheels.py" || goto :fail
 
 echo.

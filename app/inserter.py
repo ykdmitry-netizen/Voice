@@ -112,8 +112,22 @@ def _key(vk: int, flags: int = 0, scan: int = 0) -> INPUT:
 
 
 # --- буфер обмена --------------------------------------------------------
+def _open_clipboard(retries: int = 10, delay: float = 0.03) -> bool:
+    """Открывает буфер обмена с повторами.
+
+    Буфер — общий ресурс: его может держать другое приложение (проводник,
+    браузер, мессенджер). Без повторов вставка иногда молча не срабатывает.
+    """
+    for attempt in range(retries):
+        if user32.OpenClipboard(None):
+            return True
+        if attempt < retries - 1:
+            time.sleep(delay)
+    return False
+
+
 def get_clipboard_text() -> str:
-    if not user32.OpenClipboard(None):
+    if not _open_clipboard():
         return ""
     try:
         handle = user32.GetClipboardData(CF_UNICODETEXT)
@@ -133,7 +147,7 @@ def get_clipboard_text() -> str:
 def set_clipboard_text(text: str) -> bool:
     data = ctypes.create_unicode_buffer(text)
     size = ctypes.sizeof(data)
-    if not user32.OpenClipboard(None):
+    if not _open_clipboard():
         return False
     try:
         user32.EmptyClipboard()

@@ -1,8 +1,8 @@
 """Pantela Voice для Windows — локальная диктовка.
 
-Точка входа: главный поток отдан Tk (панель состояния + окно настроек),
-горячая клавиша живёт в своём потоке с хуком клавиатуры, распознавание — в
-рабочем потоке, значок в трее — в потоке pystray.
+Точка входа: главный поток отдан Tk (индикатор состояния + окно настроек),
+горячая клавиша и значок в трее живут в своих потоках с циклами сообщений
+Windows, распознавание — в рабочем потоке.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from . import asr, audio, inserter, models
 from .config import Settings, format_hotkey, home_dir, log_path
 from .hotkey import GlobalHotkey
 from .overlay import ControlWindow, Overlay
+from .tray import TrayIcon, make_icon_file
 
 APP_TITLE = "Pantela Voice"
 MUTEX_NAME = "Global\\PantelaVoiceWin_SingleInstance"
@@ -342,46 +343,31 @@ class Application:
         self._settings_window = SettingsWindow(self)
 
     # --- трей -------------------------------------------------------------
-    @staticmethod
-    def _patch_pystray() -> None:
-        """pystray считает фатальной неудачу ChangeWindowMessageFilterEx, хотя
-        этот вызов лишь разрешает приём WM_TASKBARCREATED при запуске с
-        повышенными правами. Под ограниченным токеном он возвращает «отказано
-        в доступе» — подменяем заглушкой, значок в трее от этого не страдает."""
-        try:
-            from pystray._util import win32 as pystray_win32
+    def _build_tray(self) -> TrayIcon:
+        icon_path = os.path.join(home_dir(), "tray.ico")
+        if not os.path.exists(icon_path):
+            if not make_icon_file(icon_path):
+                icon_path = ""
 
-            pystray_win32.ChangeWindowMessageFilterEx = lambda *args, **kwargs: True
-        except Exception:  # noqa: BLE001
-            pass
+        def items() -> list[tuple[str, object]]:
+            return [
+                ("Остановить диктовку" if self._recording else "Начать диктовку",
+                 lambda: self.events.put(("toggle", None))),
+                ("-", None),
+                ("Настройки…", lambda: self.events.put(("settings", None))),
+                ("Открыть журнал", self._open_log),
+                ("Открыть папку моделей", self._open_models),
+                ("-", None),
+                ("Выход", lambda: self.events.put(("quit", None))),
+            ]
 
-    def _build_tray(self):
-        import pystray
-        from PIL import Image, ImageDraw
-
-        self._patch_pystray()
-
-        size = 64
-        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((4, 4, size - 4, size - 4), radius=14, fill=(76, 141, 255, 255))
-        draw.rounded_rectangle((26, 14, 38, 36), radius=6, fill=(255, 255, 255, 255))
-        draw.arc((18, 22, 46, 46), start=0, end=180, fill=(255, 255, 255, 255), width=4)
-        draw.line((32, 46, 32, 52), fill=(255, 255, 255, 255), width=4)
-
-        menu = pystray.Menu(
-            pystray.MenuItem(
-                lambda _: "Остановить диктовку" if self._recording else "Начать диктовку",
-                lambda: self.events.put(("toggle", None)),
-                default=True,
-            ),
-            pystray.MenuItem("Настройки…", lambda: self.events.put(("settings", None))),
-            pystray.MenuItem("Открыть журнал", self._open_log),
-            pystray.MenuItem("Открыть папку моделей", self._open_models),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Выход", lambda: self.events.put(("quit", None))),
+        return TrayIcon(
+            APP_TITLE,
+            items,
+            on_default=lambda: self.events.put(("toggle", None)),
+            icon_path=icon_path,
+            log=log.warning,
         )
-        return pystray.Icon("PantelaVoice", image, APP_TITLE, menu)
 
     def _open_log(self, *_args) -> None:
         try:
@@ -394,25 +380,6 @@ class Application:
             os.startfile(self.settings.models_dir)  # noqa: S606
         except OSError:
             log.warning("не удалось открыть папку моделей")
-
-    def _run_tray(self) -> None:
-        def ready(icon) -> None:  # noqa: ANN001
-            log.info("значок в трее установлен (visible=%s)", icon.visible)
-
-        try:
-            self._tray.run(setup=ready)
-        except Exception as exc:  # noqa: BLE001
-            log.exception("значок в трее недоступен")
-            self.events.put(("tray_failed", str(exc)))
-
-    def _check_tray(self) -> None:
-        """Значок может не появиться без ошибки (Shell_NotifyIcon тихо не
-        срабатывает под ограниченным токеном). Тогда даём окно управления."""
-        if self._tray is None:
-            return
-        if not getattr(self._tray, "visible", False):
-            log.warning("значок в трее не отображается — включаю резервное окно")
-            self._show_control_window()
 
     def _show_control_window(self) -> None:
         if self._control is not None:
@@ -443,8 +410,11 @@ class Application:
         if os.environ.get("PANTELA_NO_TRAY") != "1":
             try:
                 self._tray = self._build_tray()
-                threading.Thread(target=self._run_tray, name="tray", daemon=True).start()
-                self.root.after(2500, self._check_tray)
+                if self._tray.start():
+                    log.info("значок в трее установлен")
+                else:
+                    log.warning("значок в трее не установился — включаю резервное окно")
+                    self._show_control_window()
             except Exception:  # noqa: BLE001
                 log.exception("трей недоступен")
                 self._show_control_window()

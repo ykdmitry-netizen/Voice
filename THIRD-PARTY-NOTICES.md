@@ -24,7 +24,6 @@
 | CTranslate2 | MIT |
 | faster-whisper | MIT |
 | sounddevice (PortAudio) | MIT |
-| pystray | LGPL-3.0 |
 | Pillow | MIT-CMU |
 
 ## Происхождение

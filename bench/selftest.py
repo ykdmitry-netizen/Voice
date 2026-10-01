@@ -121,22 +121,45 @@ def t_hotkey_hook() -> str:
 def t_ui() -> str:
     import tkinter as tk
 
-    from app.overlay import Overlay
+    from app.overlay import ControlWindow, Overlay
 
     root = tk.Tk()
     root.withdraw()
     overlay = Overlay(root, show=True)
-    overlay.set("Проверка", "текст", level=0.5)
+
+    overlay.recording(0.4)
+    root.update()
+    width_recording = overlay._width
+
+    overlay.set_level(0.9)
+    overlay.working("1.2 с")
+    root.update()
+
+    overlay.done("готово: проверка панели")
+    root.update()
+    width_message = overlay._width
+
+    overlay.notice("Проверка", hide_after_ms=100)
     root.update()
     overlay.hide()
+
+    control = ControlWindow(root, lambda: None, lambda: None, lambda: None)
+    control.set_recording(True)
+    root.update()
+    control.destroy()
+
     overlay.destroy()
     root.destroy()
-    return "панель состояния создаётся"
+    assert width_message > width_recording, "сообщение должно быть шире компактного индикатора"
+    return f"индикатор компактный ({width_recording}px), сообщение {width_message}px"
 
 
 def t_tray_icon() -> str:
-    from app.config import Settings
+    import os
+
+    from app.config import Settings, home_dir
     from app.main import Application
+    from app.tray import TrayIcon, make_icon_file
 
     class FakeApp(Application):  # noqa: D101
         def __init__(self) -> None:  # noqa: D107
@@ -145,8 +168,17 @@ def t_tray_icon() -> str:
             self.events = type("Q", (), {"put": staticmethod(lambda _x: None)})()
 
     icon = FakeApp()._build_tray()
-    assert icon is not None
-    return f"значок трея собран: {icon.title}"
+    assert isinstance(icon, TrayIcon), "ожидался нативный значок"
+
+    icon_path = os.path.join(home_dir(), "tray.ico")
+    assert make_icon_file(icon_path), "не удалось нарисовать значок"
+    assert os.path.getsize(icon_path) > 500, "файл значка подозрительно мал"
+
+    started = icon.start(timeout=2.0)
+    icon.notify("Проверка", "значок в трее")
+    icon.stop()
+    state = "значок появился" if started else "значок не появился (нет доступа к панели задач)"
+    return f"файл значка {os.path.getsize(icon_path)} байт, {state}"
 
 
 def t_models_present() -> str:

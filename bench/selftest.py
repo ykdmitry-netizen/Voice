@@ -135,7 +135,7 @@ def t_ui() -> str:
     overlay.working("1.2 с")
     root.update()
 
-    overlay.done("готово: проверка панели")
+    overlay.done("готово: проверка панели индикатора диктовки")
     root.update()
     width_message = overlay._width
 
@@ -193,21 +193,75 @@ def t_models_present() -> str:
     return f"parakeet на месте ({models.total_size('parakeet') / 1e6:.0f} МБ), gigaam {state}"
 
 
-def t_settings_window() -> str:
+def t_main_window() -> str:
     from app.config import Settings
     from app.main import Application
-    from app.settings_ui import SettingsWindow
 
     app = Application(Settings(show_overlay=False, play_sound=False))
     app.overlay.enabled = False
-    window = SettingsWindow(app)
+    app.history.clear()
+    app.history.add("Проверка словаря и статистики приложения", 4.0, "parakeet")
+    app.history.add("Вторая фраза для проверки категорий", 6.0, "parakeet")
+
+    window = app.window
+    for key in ("home", "summary", "settings", "help"):
+        window.show_tab(key)
+        app.root.update()
+    window.refresh_all()
     app.root.update()
-    tabs = window.win.winfo_children()
-    assert tabs, "окно настроек пустое"
-    window.close()
-    app.root.update()
+
+    words = window.tabs["home"].stat_values["words"].cget("text")
+    minutes = window.tabs["summary"].stat_values["minutes"].cget("text")
+    assert words.strip() not in ("", "0"), "статистика не посчиталась"
+    assert int(minutes) >= 0
     app.quit()
-    return "окно настроек открывается и закрывается"
+    return f"4 вкладки, слов в статистике: {words}, минут: {minutes}"
+
+
+def t_history_stats() -> str:
+    import tempfile
+
+    from app import stats
+    from app.history import Entry, History
+
+    path = os.path.join(tempfile.gettempdir(), "pantela_test_history.jsonl")
+    if os.path.exists(path):
+        os.remove(path)
+    history = History(path)
+    history.add("Нужно проверить документ и отправить отчёт", 5.0)
+    history.add("Идея: сделать заметку про проект", 4.0)
+    history.add("Обычная фраза без ключевых слов", 3.0)
+    entries = history.entries()
+    assert len(entries) == 3, entries
+    summary = stats.summarize(entries)
+    names = [name for name, _c, _p in summary.categories]
+    assert summary.words > 10
+    assert summary.days == 1
+    assert "Документы" in names or "Задачи" in names, names
+    assert summary.activity and len(summary.activity) == 28
+    history.clear()
+    return (f"слов {summary.words}, категорий {len(summary.categories)}, "
+            f"топ: {names[0] if names else '—'}")
+
+
+def t_history_roundtrip() -> str:
+    from app.history import Entry, History
+
+    path = os.path.join(os.environ.get("PANTELA_HOME", "."), "roundtrip.jsonl")
+    if os.path.exists(path):
+        os.remove(path)
+    first = History(path)
+    first.add("Первая строка", 1.0)
+    first.add("Вторая строка", 2.0)
+    second = History(path)
+    assert len(second.entries()) == 2, second.entries()
+    assert second.entries()[0].text == "Вторая строка"
+    removed = second.entries()[0]
+    second.remove(removed)
+    third = History(path)
+    assert len(third.entries()) == 1, third.entries()
+    os.remove(path)
+    return "запись, чтение и удаление истории работают"
 
 
 def t_import_main() -> str:
@@ -228,7 +282,9 @@ def main() -> int:
     check("хук клавиатуры", t_hotkey_hook)
     check("панель состояния", t_ui)
     check("значок в трее", t_tray_icon)
-    check("окно настроек", t_settings_window)
+    check("главное окно", t_main_window)
+    check("история: запись и удаление", t_history_roundtrip)
+    check("история: статистика", t_history_stats)
     check("импорт приложения", t_import_main)
 
     width = max(len(name) for name, _ok, _d in results)

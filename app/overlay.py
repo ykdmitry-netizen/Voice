@@ -1,9 +1,8 @@
 """Экранный индикатор диктовки и резервное окно управления.
 
-Индикатор — компактная «пилюля» внизу экрана: цветная точка состояния и
-столбики уровня микрофона. Никаких надписей вроде «Запись…»: во время записи
-говорит сама анимация, а текст появляется только в коротком сообщении с
-результатом.
+Индикатор — компактная тёмная «пилюля» с золотой рамкой внизу экрана: красный
+кружок записи и волна уровня микрофона. Слов во время записи нет — говорит
+анимация; текст появляется только в коротком сообщении с результатом.
 """
 
 from __future__ import annotations
@@ -12,33 +11,16 @@ import math
 import tkinter as tk
 from collections import deque
 from tkinter import font as tkfont
-from tkinter import ttk
 
-BG = "#12141a"
-BORDER = "#272c38"
-TEXT = "#e9ecf1"
-DIM = "#8b93a1"
-ACCENT = "#4c8dff"
-REC = "#ff4b4b"
-OK = "#35d07f"
-BAR_IDLE = "#333a49"
+from . import theme
+from .theme import DIM, GOLD, GOLD_DIM, GREEN, RED, TEXT
 
+PANEL = "#121214"
 HEIGHT = 44
-WIDTH_COMPACT = 186
-WIDTH_MAX = 400
-BAR_COUNT = 14
-PAD_LEFT = 30
-
-
-def round_rect(canvas: tk.Canvas, x1: float, y1: float, x2: float, y2: float,
-               r: float, **kwargs) -> int:
-    """Скруглённый прямоугольник: canvas не умеет их из коробки."""
-    points = [
-        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
-        x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
-        x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
-    ]
-    return canvas.create_polygon(points, smooth=True, **kwargs)
+WIDTH_COMPACT = 208
+WIDTH_MAX = 420
+WAVE_POINTS = 15
+PAD_LEFT = 34
 
 
 class Overlay:
@@ -51,8 +33,8 @@ class Overlay:
         self._state = "idle"
         self._message = ""
         self._note = ""
-        self._color = ACCENT
-        self._levels: deque[float] = deque([0.0] * BAR_COUNT, maxlen=BAR_COUNT)
+        self._color = GOLD
+        self._levels: deque[float] = deque([0.0] * WAVE_POINTS, maxlen=WAVE_POINTS)
         self._phase = 0.0
         self._width = WIDTH_COMPACT
 
@@ -64,11 +46,12 @@ class Overlay:
             self.win.attributes("-alpha", 0.97)
         except tk.TclError:
             pass
-        self.win.configure(bg=BG)
+        self.win.configure(bg=PANEL)
 
-        self.font = tkfont.Font(family="Segoe UI", size=10)
+        self.font = tkfont.Font(family=theme.FAMILY, size=10)
         self.canvas = tk.Canvas(
-            self.win, width=self._width, height=HEIGHT, bg=BG, highlightthickness=0
+            self.win, width=self._width, height=HEIGHT, bg=PANEL,
+            highlightthickness=0, bd=0,
         )
         self.canvas.pack()
 
@@ -78,7 +61,7 @@ class Overlay:
         screen_w = self.win.winfo_screenwidth()
         screen_h = self.win.winfo_screenheight()
         x = (screen_w - self._width) // 2
-        y = screen_h - HEIGHT - 72
+        y = screen_h - HEIGHT - 76
         self.win.geometry(f"{self._width}x{HEIGHT}+{x}+{y}")
 
     def _resize(self, width: int) -> None:
@@ -94,45 +77,44 @@ class Overlay:
         c.delete("all")
         w = self._width
         cy = HEIGHT / 2
-        round_rect(c, 1, 1, w - 1, HEIGHT - 1, 13, fill=BG, outline=BORDER)
+        theme.round_rect(c, 1, 1, w - 1, HEIGHT - 1, 13,
+                         fill=PANEL, outline=GOLD_DIM)
 
         if self._state == "recording":
-            pulse = 5.0 + 2.0 * self._levels[-1]
-            c.create_oval(20 - pulse, cy - pulse, 20 + pulse, cy + pulse,
-                          fill=REC, outline="")
-            self._draw_bars(c, cy, lambda i: self._levels[i])
+            pulse = 4.5 + 2.0 * self._levels[-1]
+            c.create_oval(19 - pulse, cy - pulse, 19 + pulse, cy + pulse,
+                          fill=RED, outline="")
+            self._draw_wave(c, cy, list(self._levels), GOLD)
         elif self._state == "working":
-            c.create_oval(15, cy - 5, 25, cy + 5, fill=ACCENT, outline="")
-            self._draw_bars(
-                c, cy,
-                lambda i: 0.15 + 0.85 * abs(math.sin(self._phase * 1.6 + i * 0.55)),
-            )
+            c.create_oval(15, cy - 4.5, 24, cy + 4.5, fill=GOLD, outline="")
+            wave = [0.18 + 0.82 * abs(math.sin(self._phase * 1.5 + i * 0.5))
+                    for i in range(WAVE_POINTS)]
+            self._draw_wave(c, cy, wave, GOLD)
             if self._note:
                 c.create_text(w - 14, cy, text=self._note, anchor="e",
                               fill=DIM, font=self.font)
         else:
             if self._state == "done":
-                c.create_oval(14, cy - 7, 28, cy + 7, fill=OK, outline="")
-                c.create_line(18, cy, 21, cy + 3.5, 25, cy - 3.5,
-                              fill=BG, width=2, capstyle="round", joinstyle="round")
+                c.create_oval(13, cy - 7, 27, cy + 7, fill=GREEN, outline="")
+                c.create_line(17, cy, 20, cy + 3.5, 24, cy - 3.5,
+                              fill=PANEL, width=2, capstyle="round", joinstyle="round")
             else:
-                c.create_oval(16, cy - 6, 28, cy + 6, fill=self._color, outline="")
+                c.create_oval(15, cy - 6, 27, cy + 6, fill=self._color, outline="")
             if self._message:
-                c.create_text(PAD_LEFT + 6, cy, text=self._message, anchor="w",
+                c.create_text(PAD_LEFT + 4, cy, text=self._message, anchor="w",
                               fill=TEXT, font=self.font)
-            elif self._state == "working":
-                pass
 
-    def _draw_bars(self, c: tk.Canvas, cy: float, value) -> None:  # noqa: ANN001
+    def _draw_wave(self, c: tk.Canvas, cy: float, values: list[float],
+                   color: str) -> None:
         span = self._width - PAD_LEFT - 16
-        step = span / (BAR_COUNT - 1)
-        for i in range(BAR_COUNT):
-            level = max(0.0, min(1.0, value(i)))
-            half = 2.5 + 13.0 * level
-            x = PAD_LEFT + i * step
-            c.create_line(x, cy - half, x, cy + half, width=3.0,
-                          capstyle="round",
-                          fill=ACCENT if level > 0.12 else BAR_IDLE)
+        step = span / (WAVE_POINTS - 1)
+        coords: list[float] = []
+        for index, value in enumerate(values):
+            level = max(0.0, min(1.0, value))
+            offset = (2.0 + 13.0 * level) * (1 if index % 2 else -1)
+            coords.extend((PAD_LEFT + index * step, cy + offset))
+        c.create_line(*coords, fill=color, width=2, smooth=True,
+                      capstyle="round", joinstyle="round")
 
     # --- анимация ---------------------------------------------------------
     def _tick(self) -> None:
@@ -141,14 +123,14 @@ class Overlay:
             return
         self._phase += 0.12
         if self._state == "recording":
-            # столбики плавно опадают, если уровень не поднимается
-            self._levels.append(self._levels[-1] * 0.82)
+            # волна опадает, если уровень не поднимается
+            self._levels.append(self._levels[-1] * 0.8)
         self._draw()
-        self._tick_job = self.root.after(50, self._tick)
+        self._tick_job = self.root.after(60, self._tick)
 
     def _ensure_animation(self) -> None:
         if self._tick_job is None and self.enabled:
-            self._tick_job = self.root.after(50, self._tick)
+            self._tick_job = self.root.after(60, self._tick)
 
     def _stop_animation(self) -> None:
         if self._tick_job is not None:
@@ -182,7 +164,7 @@ class Overlay:
         return text + "…"
 
     def set_level(self, level: float) -> None:
-        """Уровень 0..1 — попадает в столбики индикатора."""
+        """Уровень 0..1 — попадает в волну индикатора."""
         self._levels.append(max(0.0, min(1.0, level)))
 
     def recording(self, level: float = 0.0) -> None:
@@ -209,14 +191,14 @@ class Overlay:
         self._ensure_animation()
 
     def done(self, text: str, hide_after_ms: int = 1600) -> None:
-        self._message_state("done", text, OK, hide_after_ms)
+        self._message_state("done", text, GREEN, hide_after_ms)
 
     def notice(self, title: str, subtitle: str = "", color: str = DIM,
                hide_after_ms: int = 2200) -> None:
         self._message_state("notice", title, color, hide_after_ms)
 
     def error(self, message: str, hide_after_ms: int = 4000) -> None:
-        self._message_state("error", message, REC, hide_after_ms)
+        self._message_state("error", message, RED, hide_after_ms)
 
     def _message_state(self, state: str, text: str, color: str,
                        hide_after_ms: int) -> None:
@@ -226,7 +208,7 @@ class Overlay:
         self._state = state
         self._message = self._fit(text)
         self._color = color
-        self._resize(PAD_LEFT + 24 + int(self.font.measure(self._message)))
+        self._resize(PAD_LEFT + 22 + int(self.font.measure(self._message)))
         self._show_window()
         self._draw()
         self._schedule_hide(hide_after_ms)
@@ -263,42 +245,43 @@ class Overlay:
 
 
 class ControlWindow:
-    """Резервное окно управления — на случай, если значок в трее не появился."""
+    """Резервное окно управления — если значок в трее не появился."""
 
     def __init__(self, root: tk.Tk, on_toggle, on_settings, on_quit) -> None:
         self.win = tk.Toplevel(root)
         self.win.title("Pantela Voice")
         self.win.attributes("-topmost", True)
         self.win.resizable(False, False)
-        self.win.configure(bg="#f4f6fa")
+        self.win.configure(bg=theme.BG)
 
-        outer = ttk.Frame(self.win, padding=(18, 16, 18, 16))
-        outer.pack(fill="both", expand=True)
+        card = theme.Card(self.win, 320, 258, radius=16, padding=20, bg=theme.BG)
+        card.pack(padx=12, pady=12)
+        body = card.body
 
-        head = ttk.Frame(outer)
-        head.pack(fill="x", pady=(0, 10))
-        ttk.Label(head, text="Pantela Voice",
-                  font=("Segoe UI Semibold", 13)).pack(side="left")
-        ttk.Label(head, text="диктовка", foreground="#6b7280").pack(side="left", padx=(8, 0))
+        head = tk.Frame(body, bg=theme.PANEL)
+        head.pack(fill="x", pady=(0, 4))
+        theme.icon_label(head, theme.ICONS["mic"], bg=theme.PANEL).pack(side="left")
+        theme.label(head, "Pantela Voice", size=13, weight="bold",
+                    bg=theme.PANEL).pack(side="left", padx=(8, 0))
 
-        ttk.Label(
-            outer,
-            text="Значок в трее не появился — управление этими кнопками.",
-            foreground="#4b5563",
-            wraplength=250,
-            justify="left",
-        ).pack(anchor="w", pady=(0, 12))
+        theme.label(body, "Значок в трее не появился.\nУправление — этими кнопками.",
+                    fg=theme.DIM, size=9, bg=theme.PANEL,
+                    justify="left").pack(anchor="w", pady=(0, 14))
 
-        self.toggle_btn = ttk.Button(outer, text="Начать диктовку", width=26, command=on_toggle)
-        self.toggle_btn.pack(fill="x", pady=3)
-        ttk.Button(outer, text="Настройки…", width=26, command=on_settings).pack(fill="x", pady=3)
-        ttk.Separator(outer).pack(fill="x", pady=(12, 10))
-        ttk.Button(outer, text="Выход", width=26, command=on_quit).pack(fill="x")
+        self.toggle_btn = theme.RoundButton(
+            body, "Начать диктовку", glyph=theme.ICONS["mic"], command=on_toggle,
+            width=278, height=38, accent=True,
+        )
+        self.toggle_btn.pack(pady=3)
+        theme.RoundButton(body, "Настройки", glyph=theme.ICONS["settings"],
+                          command=on_settings, width=278, height=36).pack(pady=3)
+        theme.RoundButton(body, "Выход", glyph=theme.ICONS["power"], command=on_quit,
+                          width=278, height=36).pack(pady=3)
 
     def set_recording(self, recording: bool) -> None:
         try:
-            self.toggle_btn.configure(
-                text="Остановить диктовку" if recording else "Начать диктовку"
+            self.toggle_btn.set_text(
+                "Остановить диктовку" if recording else "Начать диктовку"
             )
         except tk.TclError:
             pass

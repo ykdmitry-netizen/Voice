@@ -15,9 +15,11 @@ import threading
 import time
 import tkinter as tk
 
-from . import asr, audio, inserter, models
+from . import asr, audio, inserter, models, theme
 from .config import Settings, format_hotkey, home_dir, log_path
+from .history import History
 from .hotkey import GlobalHotkey
+from .main_window import MainWindow
 from .overlay import ControlWindow, Overlay
 from .tray import TrayIcon, make_icon_file
 
@@ -91,6 +93,7 @@ class Application:
 
         self.overlay = Overlay(self.root, self.settings.show_overlay)
         self.recorder = audio.Recorder()
+        self.history = History()
         self.events: queue.Queue = queue.Queue()
         self.jobs: queue.Queue = queue.Queue()
 
@@ -100,13 +103,14 @@ class Application:
         self._recording = False
         self._toggled_on = False
         self._busy = False
-        self._settings_window = None
         self._tray = None
         self._control = None
         self._pump_job: str | None = None
         self._stopping = False
         self._worker = threading.Thread(target=self._worker_loop, name="asr", daemon=True)
         self._worker.start()
+
+        self.window = MainWindow(self)
 
         self.hotkey = GlobalHotkey(
             self.settings.hotkey,
@@ -162,7 +166,7 @@ class Application:
                     "распознано %.2f с речи за %.2f с (%.1fx): %s",
                     duration, elapsed, duration / elapsed if elapsed else 0, text[:120],
                 )
-                self.events.put(("result", text))
+                self.events.put(("result", (text, duration)))
             except Exception as exc:  # noqa: BLE001
                 self.engine_error = str(exc)
                 log.exception("ошибка распознавания")
@@ -182,6 +186,7 @@ class Application:
         self._recording = True
         if self._control is not None:
             self._control.set_recording(True)
+        self.window.set_recording(True)
         log.info("запись начата (микрофон: %s)", self.recorder.device_name)
         self._beep()
         self.overlay.recording(0.0)
@@ -192,6 +197,7 @@ class Application:
         self._recording = False
         if self._control is not None:
             self._control.set_recording(False)
+        self.window.set_recording(False)
         samples = self.recorder.stop()
         if cancel:
             self.overlay.notice("Отменено", "", hide_after_ms=900)
@@ -214,14 +220,16 @@ class Application:
         self.overlay.working(f"{duration:.1f} с речи")
         self.jobs.put((samples, self.settings.language))
 
-    def _deliver(self, text: str) -> None:
+    def _deliver(self, text: str, seconds: float = 0.0) -> None:
         self._busy = False
         if not text:
             self.overlay.notice("Ничего не распознано", "", hide_after_ms=1600)
+            self.window.set_status("Ничего не распознано", theme.MUTE)
             return
         text = text.strip()
         if not text:
             self.overlay.notice("Ничего не распознано", "", hide_after_ms=1600)
+            self.window.set_status("Ничего не распознано", theme.MUTE)
             return
 
         pasted = False
@@ -239,17 +247,22 @@ class Application:
             except Exception as exc:  # noqa: BLE001
                 log.exception("вставка не удалась")
                 self.overlay.error(f"вставка не удалась: {exc}")
+                self.window.set_status(f"Вставка не удалась: {exc}", theme.RED)
                 return
         elif self.settings.copy_to_clipboard:
             copied = inserter.set_clipboard_text(text)
 
+        self.history.add(text, seconds, self.settings.engine)
+        self.window.refresh_all()
+
         if pasted:
-            title = "Вставлено"
+            title, status = "Вставлено", "Текст вставлен в активное окно"
         elif copied:
-            title = "Скопировано"
+            title, status = "Скопировано", "Текст скопирован в буфер обмена"
         else:
-            title = "Распознано"
+            title, status = "Распознано", "Текст распознан"
         log.info("%s: %s", title, text[:120])
+        self.window.set_status(f"{status} · {len(text.split())} сл.", theme.GREEN)
         self.overlay.done(text)
 
     def _beep(self, error: bool = False) -> None:
@@ -288,7 +301,10 @@ class Application:
             else:
                 self._start_recording()
         elif kind == "result":
-            self._deliver(payload or "")
+            if isinstance(payload, tuple):
+                self._deliver(payload[0], payload[1] if len(payload) > 1 else 0.0)
+            else:
+                self._deliver(payload or "")
         elif kind == "error":
             self._busy = False
             self.overlay.error(str(payload)[:80])
@@ -298,6 +314,8 @@ class Application:
             self.overlay.notice("Модель не готова", str(payload)[:60], hide_after_ms=4000)
         elif kind == "settings":
             self.open_settings()
+        elif kind == "window":
+            self.window.toggle()
         elif kind == "tray_failed":
             log.warning("переходим на резервное окно управления: %s", payload)
             self._show_control_window()
@@ -329,18 +347,83 @@ class Application:
             pass
 
         if self._recording:
-            self.overlay.set_level(self.recorder.level * 3.2)
+            level = self.recorder.level * 3.2
+            self.overlay.set_level(level)
+            self.window.push_level(min(1.0, level))
 
         self._pump_job = self.root.after(40, self._pump)
 
-    # --- настройки --------------------------------------------------------
-    def open_settings(self) -> None:
-        if self._settings_window is not None and self._settings_window.alive:
-            self._settings_window.focus()
-            return
-        from .settings_ui import SettingsWindow
+    # --- команды из интерфейса --------------------------------------------
+    def toggle_dictation(self) -> None:
+        self.events.put(("toggle", None))
 
-        self._settings_window = SettingsWindow(self)
+    def copy_to_clipboard(self, text: str) -> bool:
+        try:
+            return inserter.set_clipboard_text(text)
+        except Exception:  # noqa: BLE001
+            log.exception("не удалось скопировать")
+            return False
+
+    def open_settings(self) -> None:
+        self.window.show("settings")
+
+    def open_models(self) -> None:
+        try:
+            os.startfile(self.settings.models_dir)  # noqa: S606
+        except OSError:
+            log.warning("не удалось открыть папку моделей")
+
+    def open_log(self) -> None:
+        try:
+            os.startfile(log_path())  # noqa: S606
+        except OSError:
+            log.warning("не удалось открыть журнал")
+
+    def apply_settings(self, values: dict) -> str:
+        """Применяет настройки из окна: сохраняет и перезапускает то, что нужно."""
+        old = self.settings
+        known = {f for f in Settings.__dataclass_fields__}
+        merged = {**old.__dict__, **{k: v for k, v in values.items() if k in known}}
+        new = Settings(**{k: v for k, v in merged.items() if k in known})
+        try:
+            new.save()
+        except OSError as exc:
+            return f"Не удалось сохранить: {exc}"
+
+        self.settings = new
+        self.overlay.enabled = new.show_overlay
+
+        if new.hotkey != old.hotkey or new.mode != old.mode:
+            try:
+                self.hotkey.stop()
+                self.hotkey = GlobalHotkey(
+                    new.hotkey,
+                    on_press=lambda: self.events.put(("press", None)),
+                    on_release=lambda: self.events.put(("release", None)),
+                    on_cancel=lambda: self.events.put(("cancel", None)),
+                    log=log.warning,
+                )
+                self.hotkey.start()
+                log.info("горячая клавиша: %s", format_hotkey(new.hotkey))
+            except Exception:  # noqa: BLE001
+                log.exception("не удалось перезапустить горячую клавишу")
+                return "Сохранено, но горячая клавиша не перезапустилась"
+
+        if (new.engine != old.engine or new.whisper_model != old.whisper_model
+                or new.models_dir != old.models_dir):
+            self.reload_engine()
+            threading.Thread(target=self._warmup, name="warmup", daemon=True).start()
+
+        if new.autostart != old.autostart:
+            try:
+                set_autostart(new.autostart)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("автозапуск не настроен: %s", exc)
+                return f"Сохранено, автозапуск не настроен: {exc}"
+
+        self.window.refresh_all()
+        log.info("настройки сохранены")
+        return "Сохранено"
 
     # --- трей -------------------------------------------------------------
     def _build_tray(self) -> TrayIcon:
@@ -351,10 +434,11 @@ class Application:
 
         def items() -> list[tuple[str, object]]:
             return [
+                ("Открыть окно", lambda: self.events.put(("window", None))),
                 ("Остановить диктовку" if self._recording else "Начать диктовку",
                  lambda: self.events.put(("toggle", None))),
                 ("-", None),
-                ("Настройки…", lambda: self.events.put(("settings", None))),
+                ("Настройки", lambda: self.events.put(("settings", None))),
                 ("Открыть журнал", self._open_log),
                 ("Открыть папку моделей", self._open_models),
                 ("-", None),
@@ -421,6 +505,7 @@ class Application:
         else:
             log.info("трей отключён переменной PANTELA_NO_TRAY")
 
+        self.window.show()
         self._pump_job = self.root.after(40, self._pump)
         self.root.mainloop()
 
@@ -448,6 +533,10 @@ class Application:
                 pass
         try:
             self.overlay.destroy()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.window.destroy()
         except Exception:  # noqa: BLE001
             pass
         if self._control is not None:

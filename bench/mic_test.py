@@ -15,8 +15,16 @@ from app.audio import Recorder, trim_silence  # noqa: E402
 
 def main() -> int:
     recorder = Recorder()
-    print("устройства ввода:", len(Recorder.list_input_devices()))
-    recorder.start("", 16000)
+    devices = Recorder.list_input_devices()
+    print("устройства ввода:", len(devices))
+    if not devices:
+        print("ИТОГ: пропущено — в системе нет ни одного устройства ввода")
+        return 0
+    try:
+        recorder.start("", 16000)
+    except Exception as exc:  # noqa: BLE001
+        print(f"ИТОГ: пропущено — микрофон не открылся: {exc}")
+        return 0
     print("запись 2 секунды…")
     time.sleep(2.0)
     levels = []

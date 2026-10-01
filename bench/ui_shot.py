@@ -1,4 +1,4 @@
-"""Снимки интерфейса: индикатор диктовки, окно управления, настройки.
+"""Снимки интерфейса: индикатор диктовки и четыре вкладки главного окна.
 
 Важно: используется единственный `Tk()` — тот, что создаёт само приложение.
 Второй экземпляр Tk в одном процессе уводит StringVar в другой интерпретатор
@@ -25,10 +25,17 @@ from PIL import ImageGrab  # noqa: E402
 
 from app.config import Settings  # noqa: E402
 from app.main import Application  # noqa: E402
-from app.overlay import ControlWindow  # noqa: E402
-from app.settings_ui import SettingsWindow  # noqa: E402
 
 SHOTS = os.path.join(ROOT, "bench", "shots")
+
+DEMO = [
+    ("Так, теперь пошла настоящая проверка. Смотри, зашёл.", 39.0),
+    ("Смотри, вот сейчас я зашёл на страницу статусы ящика и всё проверил.", 69.0),
+    ("Не работает твоя фишка. Всё равно доступ запрещён, проверь права.", 63.0),
+    ("Смотри, ещё по сертификату. Там и добавил сертификат приложения.", 39.0),
+    ("Давай, набирай. Всё, что есть, я сейчас посмотрю, что тут не так.", 24.0),
+    ("Смотри, заходил только что, уже, наверное, раз пятый. Так нужно.", 44.0),
+]
 
 
 def pump(root, seconds: float = 0.4) -> None:  # noqa: ANN001
@@ -39,7 +46,7 @@ def pump(root, seconds: float = 0.4) -> None:  # noqa: ANN001
 
 
 def grab(root, widget, name: str, pad: int = 10) -> None:  # noqa: ANN001
-    pump(root, 0.35)
+    pump(root, 0.4)
     widget.update_idletasks()
     x, y = widget.winfo_rootx(), widget.winfo_rooty()
     image = ImageGrab.grab((x - pad, y - pad, x + widget.winfo_width() + pad,
@@ -53,38 +60,37 @@ def main() -> int:
 
     app = Application(Settings(show_overlay=True, play_sound=False))
     root = app.root
-    overlay = app.overlay
-    overlay.enabled = True
+    app.overlay.enabled = True
 
+    app.history.clear()
+    now = time.time()
+    for index, (text, seconds) in enumerate(DEMO):
+        app.history.add(text, seconds, "parakeet")
+        app.history._entries[-1].ts = now - index * 3600 - 1800
+    app.history.rewrite()
+
+    overlay = app.overlay
     overlay.recording(0.35)
-    for level in (0.2, 0.55, 0.8, 0.45, 0.7, 0.3, 0.6):
+    for level in (0.25, 0.6, 0.85, 0.4, 0.7, 0.3, 0.65, 0.45):
         overlay.set_level(level)
-        pump(root, 0.06)
+        pump(root, 0.05)
     grab(root, overlay.win, "overlay_recording.png")
 
     overlay.set_level(0.9)
     overlay.working("1.4 с")
     grab(root, overlay.win, "overlay_working.png")
 
-    overlay.done("Сегодня я тестирую локальную диктовку")
+    overlay.done("Так, теперь пошла настоящая проверка")
     grab(root, overlay.win, "overlay_done.png")
-
-    overlay.notice("Слишком коротко", hide_after_ms=6000)
-    grab(root, overlay.win, "overlay_notice.png")
     overlay.hide()
 
-    control = ControlWindow(root, lambda: None, lambda: None, lambda: None)
-    grab(root, control.win, "control_window.png")
-    control.destroy()
-
-    window = SettingsWindow(app)
-    pump(root, 0.8)
-    for index, name in enumerate(
-        ["settings_recognition.png", "settings_control.png", "settings_dictionary.png"]
-    ):
-        window.notebook.select(index)
-        grab(root, window.win, name, pad=0)
-    window.close()
+    window = app.window
+    window.show()
+    window.set_status("Текст вставлен в активное окно · 9 сл.", "#7cc47f")
+    for tab in ("home", "summary", "settings", "help"):
+        window.show_tab(tab)
+        window.refresh_all()
+        grab(root, window.win, f"window_{tab}.png", pad=0)
 
     app.quit()
     print("готово:", SHOTS)

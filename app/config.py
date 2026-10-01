@@ -78,6 +78,7 @@ class Settings:
     show_overlay: bool = True
     play_sound: bool = True
     autostart: bool = False
+    weekly_goal_words: int = 2000     # цель недели для полосы прогресса на «Главной»
 
     # звук
     input_device: str = ""            # пусто — устройство по умолчанию

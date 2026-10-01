@@ -19,15 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-Модели распознавания речи распространяются под своими лицензиями и в этот
-репозиторий не входят:
-
-- NVIDIA Parakeet TDT 0.6B v3 — CC-BY-4.0
-- GigaAM v2 — MIT
-- OpenAI Whisper — MIT
-
-Проект вдохновлён PantelaVoice (https://github.com/EvgenyPantela/PantelaVoice),
-лицензия MIT; код написан заново под Windows.

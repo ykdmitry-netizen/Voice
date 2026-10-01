@@ -146,5 +146,7 @@ py -3.12 run_pantela.pyw --verbose --quit-after 10   # запуск и авто-
 
 ## Лицензии
 
-Код — MIT. Модели сохраняют свои лицензии: Parakeet TDT 0.6B v3 — NVIDIA
-CC-BY-4.0, GigaAM — MIT, Whisper — MIT. Веса моделей в репозиторий не входят.
+Код — MIT (см. [LICENSE](LICENSE)). Модели сохраняют свои лицензии: Parakeet TDT
+0.6B v3 — NVIDIA CC-BY-4.0, GigaAM — MIT, Whisper — MIT. Веса моделей в
+репозиторий не входят. Подробности — в
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

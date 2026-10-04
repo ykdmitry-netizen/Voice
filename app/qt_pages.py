@@ -625,7 +625,6 @@ class HelpPage(BasePage):
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(16)
-        root.addStretch(1)
 
         wrap = QtWidgets.QWidget()
         wrap.setMaximumWidth(880)
@@ -684,6 +683,7 @@ class HelpPage(BasePage):
              "Текст распознаётся и сам вставится туда, где стоит курсор."),
         ):
             card = Card(margins=16)
+            card.setMinimumHeight(156)
             head = QtWidgets.QHBoxLayout()
             head.addStretch(1)
             head.addWidget(th.text_label(number, th.GOLD, 12, 600))

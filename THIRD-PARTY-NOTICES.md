@@ -19,12 +19,17 @@
 
 | Компонент | Лицензия |
 |---|---|
+| Qt 6 (через PySide6) | LGPL-3.0 |
 | sherpa-onnx | Apache-2.0 |
 | onnxruntime | MIT |
 | CTranslate2 | MIT |
 | faster-whisper | MIT |
 | sounddevice (PortAudio) | MIT |
 | Pillow | MIT-CMU |
+
+Qt используется как динамически подключаемая библиотека (PySide6), исходный код
+Qt доступен на [code.qt.io](https://code.qt.io/cgit/qt/qtbase.git/) и
+[github.com/qt/qtbase](https://github.com/qt/qtbase).
 
 ## Происхождение
 

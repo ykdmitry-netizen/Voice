@@ -1,12 +1,12 @@
 @echo off
-rem Запуск Pantela Voice без консольного окна.
+rem Запуск «Гласографа» без консольного окна.
 setlocal
 set "ROOT=%~dp0"
 set "PYTHONPATH=%ROOT%pylibs"
 
 where pyw >nul 2>&1
 if %errorlevel%==0 (
-  start "" pyw -3.12 "%ROOT%run_pantela.pyw" %*
+  start "" pyw -3.12 "%ROOT%run_glasograf.pyw" %*
   exit /b 0
 )
 
@@ -17,4 +17,4 @@ if not defined PY (
   exit /b 1
 )
 set "PYW=%PY:python.exe=pythonw.exe%"
-start "" "%PYW%" "%ROOT%run_pantela.pyw" %*
+start "" "%PYW%" "%ROOT%run_glasograf.pyw" %*

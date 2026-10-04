@@ -1,12 +1,12 @@
 @echo off
-rem Установка окружения Pantela Voice с нуля на новой машине.
+rem Установка окружения «Гласографа» с нуля на новой машине.
 rem Требуется Python 3.12 x64 (проверьте: py -3.12 --version).
 setlocal
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
 echo === Шаг 1/3: библиотеки ===
-py -3.12 "%ROOT%bench\fetch_deps.py" faster-whisper sherpa-onnx sounddevice pillow || goto :fail
+py -3.12 "%ROOT%bench\fetch_deps.py" faster-whisper sherpa-onnx sounddevice pillow PySide6-Essentials || goto :fail
 py -3.12 "%ROOT%bench\unpack_wheels.py" || goto :fail
 
 echo.
@@ -19,7 +19,7 @@ set "PYTHONPATH=%ROOT%pylibs"
 py -3.12 "%ROOT%bench\selftest.py" || goto :fail
 
 echo.
-echo Готово. Запускайте PantelaVoice.bat
+echo Готово. Запускайте Glasograf.bat
 pause
 exit /b 0
 

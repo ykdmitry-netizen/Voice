@@ -1,15 +1,16 @@
-# Зависимости Pantela Voice для Windows (Python 3.12, x64).
+# Зависимости «Гласографа» (Python 3.12, x64).
 #
 # Обычная установка:
 #   py -3.12 -m pip install --target pylibs -r requirements.txt
 #
 # Если pip в системе ограничен (например, песочница запрещает запись во
 # временные каталоги), используйте встроенный установщик:
-#   py -3.12 bench\fetch_deps.py faster-whisper sherpa-onnx sounddevice pillow
+#   py -3.12 bench\fetch_deps.py faster-whisper sherpa-onnx sounddevice pillow PySide6-Essentials
 #   py -3.12 bench\unpack_wheels.py
 #
 # Версии зафиксированы по фактически проверенной сборке.
 
+PySide6-Essentials==6.11.2
 faster-whisper==1.2.1
 sherpa-onnx==1.13.8
 sounddevice==0.5.6

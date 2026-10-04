@@ -1,8 +1,8 @@
-"""Pantela Voice для Windows — локальная диктовка.
+"""Гласограф — локальная голосовая диктовка для Windows.
 
-Точка входа: главный поток отдан Tk (индикатор состояния + окно настроек),
-горячая клавиша и значок в трее живут в своих потоках с циклами сообщений
-Windows, распознавание — в рабочем потоке.
+Интерфейс на Qt (PySide6): главное окно с четырьмя разделами, индикатор
+диктовки поверх всех окон и значок в трее. Распознавание — в отдельном потоке,
+глобальная горячая клавиша — в своём потоке с хуком клавиатуры Windows.
 """
 
 from __future__ import annotations
@@ -13,18 +13,17 @@ import queue
 import sys
 import threading
 import time
-import tkinter as tk
 
-from . import asr, audio, inserter, models, theme
-from .config import Settings, format_hotkey, home_dir, log_path
+from PySide6 import QtCore, QtGui, QtWidgets
+
+from . import asr, audio, inserter, qt_theme as theme
+from .config import APP_TITLE, Settings, format_hotkey, home_dir, log_path
 from .history import History
 from .hotkey import GlobalHotkey
-from .main_window import MainWindow
-from .overlay import ControlWindow, Overlay
-from .tray import TrayIcon, make_icon_file
+from .qt_overlay import OverlayWidget
+from .qt_window import ControlWindow, MainWindow, Tray
 
-APP_TITLE = "Pantela Voice"
-MUTEX_NAME = "Global\\PantelaVoiceWin_SingleInstance"
+MUTEX_NAME = "Global\\Glasograf_SingleInstance"
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -43,16 +42,13 @@ def setup_logging(verbose: bool = False) -> None:
         handlers=handlers,
         force=True,
     )
-    # библиотека изображений слишком болтлива в режиме отладки
-    logging.getLogger("PIL").setLevel(logging.INFO)
 
 
-log = logging.getLogger("pantela")
+log = logging.getLogger("glasograf")
 
 
-def single_instance() -> bool:
-    """True, если это первый запуск. Второй экземпляр нужен только чтобы
-    показать сообщение, поэтому мутируем и отпускаем."""
+def single_instance() -> tuple[bool, object]:
+    """True, если это первый запуск."""
     import ctypes
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -66,14 +62,15 @@ def set_autostart(enabled: bool) -> None:
     import winreg
 
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-    with winreg.OpenKey(
-        winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
-    ) as key:
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
         if enabled:
             pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
             if not os.path.exists(pythonw):
                 pythonw = sys.executable
-            entry = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "run_pantela.pyw")
+            entry = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "run_glasograf.pyw",
+            )
             winreg.SetValueEx(key, APP_TITLE, 0, winreg.REG_SZ, f'"{pythonw}" "{entry}"')
         else:
             try:
@@ -82,18 +79,22 @@ def set_autostart(enabled: bool) -> None:
                 pass
 
 
-class Application:
-    def __init__(self, settings: Settings | None = None) -> None:
-        self.settings = settings or Settings.load()
+class Application(QtCore.QObject):
+    def __init__(self, argv: list[str]) -> None:
+        super().__init__()
+        self.settings = Settings.load()
         log.info("настройки: %s", self.settings)
 
-        self.root = tk.Tk()
-        self.root.withdraw()
-        self.root.title(APP_TITLE)
+        self.qapp = QtWidgets.QApplication(argv)
+        self.qapp.setApplicationName(APP_TITLE)
+        self.qapp.setApplicationDisplayName(APP_TITLE)
+        self.qapp.setQuitOnLastWindowClosed(False)
+        self.qapp.setStyleSheet(theme.stylesheet())
+        self.qapp.setWindowIcon(theme.app_icon())
 
-        self.overlay = Overlay(self.root, self.settings.show_overlay)
-        self.recorder = audio.Recorder()
+        self.quitting = False
         self.history = History()
+        self.recorder = audio.Recorder()
         self.events: queue.Queue = queue.Queue()
         self.jobs: queue.Queue = queue.Queue()
 
@@ -101,16 +102,17 @@ class Application:
         self.engine_error: str | None = None
         self._engine_lock = threading.Lock()
         self._recording = False
-        self._toggled_on = False
         self._busy = False
-        self._tray = None
         self._control = None
-        self._pump_job: str | None = None
-        self._stopping = False
-        self._worker = threading.Thread(target=self._worker_loop, name="asr", daemon=True)
-        self._worker.start()
+
+        self.overlay = OverlayWidget()
+        self.overlay.enabled = self.settings.show_overlay
 
         self.window = MainWindow(self)
+        self.tray = Tray(self, self.window)
+
+        self._worker = threading.Thread(target=self._worker_loop, name="asr", daemon=True)
+        self._worker.start()
 
         self.hotkey = GlobalHotkey(
             self.settings.hotkey,
@@ -120,12 +122,18 @@ class Application:
             log=log.warning,
         )
 
+        self._timer = QtCore.QTimer(self)
+        self._timer.setInterval(40)
+        self._timer.timeout.connect(self._pump)
+        self._timer.start()
+
     # --- движок ----------------------------------------------------------
     def _ensure_engine(self):
         with self._engine_lock:
             if self.engine is None:
                 self.engine = asr.build_engine(
-                    self.settings.engine, self.settings.models_dir, self.settings.whisper_model
+                    self.settings.engine, self.settings.models_dir,
+                    self.settings.whisper_model,
                 )
             self.engine.load()
             return self.engine
@@ -162,10 +170,9 @@ class Application:
                 text = self.settings.apply_dictionary(raw)
                 elapsed = time.perf_counter() - started
                 duration = len(samples) / audio.TARGET_RATE
-                log.info(
-                    "распознано %.2f с речи за %.2f с (%.1fx): %s",
-                    duration, elapsed, duration / elapsed if elapsed else 0, text[:120],
-                )
+                log.info("распознано %.2f с речи за %.2f с (%.1fx): %s",
+                         duration, elapsed, duration / elapsed if elapsed else 0,
+                         text[:120])
                 self.events.put(("result", (text, duration)))
             except Exception as exc:  # noqa: BLE001
                 self.engine_error = str(exc)
@@ -173,6 +180,10 @@ class Application:
                 self.events.put(("error", str(exc)))
 
     # --- сценарий диктовки -----------------------------------------------
+    @property
+    def is_recording(self) -> bool:
+        return self._recording
+
     def _start_recording(self) -> None:
         if self._recording:
             return
@@ -182,11 +193,12 @@ class Application:
             log.exception("микрофон недоступен")
             self._beep(error=True)
             self.overlay.error(f"микрофон недоступен: {exc}")
+            self.window.set_status("Микрофон недоступен", theme.RED)
             return
         self._recording = True
+        self.window.set_recording(True)
         if self._control is not None:
             self._control.set_recording(True)
-        self.window.set_recording(True)
         log.info("запись начата (микрофон: %s)", self.recorder.device_name)
         self._beep()
         self.overlay.recording(0.0)
@@ -195,12 +207,13 @@ class Application:
         if not self._recording:
             return
         self._recording = False
+        self.window.set_recording(False)
         if self._control is not None:
             self._control.set_recording(False)
-        self.window.set_recording(False)
         samples = self.recorder.stop()
         if cancel:
-            self.overlay.notice("Отменено", "", hide_after_ms=900)
+            self.overlay.notice("Отменено", hide_after_ms=900)
+            self.window.set_status("Отменено", theme.MUTE)
             return
 
         duration = len(samples) / audio.TARGET_RATE
@@ -213,22 +226,21 @@ class Application:
         samples = audio.trim_silence(samples)
         peak = float(abs(samples).max()) if samples.size else 0.0
         if peak < 0.01:
-            self.overlay.notice("Тишина в микрофоне", "проверьте устройство ввода", hide_after_ms=2500)
+            self.overlay.notice("Тишина в микрофоне", "проверьте устройство ввода",
+                                hide_after_ms=2500)
+            self.window.set_status("Тишина в микрофоне", theme.MUTE)
             return
 
         self._busy = True
         self.overlay.working(f"{duration:.1f} с речи")
+        self.window.set_status("Распознаю…", theme.DIM)
         self.jobs.put((samples, self.settings.language))
 
     def _deliver(self, text: str, seconds: float = 0.0) -> None:
         self._busy = False
+        text = (text or "").strip()
         if not text:
-            self.overlay.notice("Ничего не распознано", "", hide_after_ms=1600)
-            self.window.set_status("Ничего не распознано", theme.MUTE)
-            return
-        text = text.strip()
-        if not text:
-            self.overlay.notice("Ничего не распознано", "", hide_after_ms=1600)
+            self.overlay.notice("Ничего не распознано", hide_after_ms=1600)
             self.window.set_status("Ничего не распознано", theme.MUTE)
             return
 
@@ -274,15 +286,13 @@ class Application:
             if error:
                 winsound.MessageBeep(winsound.MB_ICONHAND)
             else:
-                threading.Thread(
-                    target=lambda: winsound.Beep(1200, 45), daemon=True
-                ).start()
+                threading.Thread(target=lambda: winsound.Beep(1200, 45),
+                                 daemon=True).start()
         except Exception:  # noqa: BLE001
             pass
 
     # --- очередь событий в главном потоке --------------------------------
     def _handle_event(self, kind: str, payload) -> bool:  # noqa: ANN001
-        """Обрабатывает одно событие. True — приложение должно завершиться."""
         if kind == "press":
             if self.settings.mode == "hold":
                 self._start_recording()
@@ -313,12 +323,9 @@ class Application:
         elif kind == "warm_error":
             self.overlay.notice("Модель не готова", str(payload)[:60], hide_after_ms=4000)
         elif kind == "settings":
-            self.open_settings()
+            self.show_window("settings")
         elif kind == "window":
-            self.window.toggle()
-        elif kind == "tray_failed":
-            log.warning("переходим на резервное окно управления: %s", payload)
-            self._show_control_window()
+            self.toggle_window()
         elif kind == "quit":
             self.quit()
             return True
@@ -327,12 +334,11 @@ class Application:
         return False
 
     def _pump(self) -> None:
-        if self._stopping:
+        if self.quitting:
             return
         try:
             while True:
                 item = self.events.get_nowait()
-                # событие может прийти как ("kind", payload) или просто "kind"
                 if isinstance(item, tuple):
                     kind = item[0]
                     payload = item[1] if len(item) > 1 else None
@@ -341,8 +347,8 @@ class Application:
                 try:
                     if self._handle_event(kind, payload):
                         return
-                except Exception:  # noqa: BLE001 - одно плохое событие не должно
-                    log.exception("ошибка обработки события %r", kind)  # ронять цикл
+                except Exception:  # noqa: BLE001
+                    log.exception("ошибка обработки события %r", kind)
         except queue.Empty:
             pass
 
@@ -350,8 +356,6 @@ class Application:
             level = self.recorder.level * 3.2
             self.overlay.set_level(level)
             self.window.push_level(min(1.0, level))
-
-        self._pump_job = self.root.after(40, self._pump)
 
     # --- команды из интерфейса --------------------------------------------
     def toggle_dictation(self) -> None:
@@ -365,7 +369,7 @@ class Application:
             return False
 
     def open_settings(self) -> None:
-        self.window.show("settings")
+        self.show_window("settings")
 
     def open_models(self) -> None:
         try:
@@ -380,7 +384,6 @@ class Application:
             log.warning("не удалось открыть журнал")
 
     def apply_settings(self, values: dict) -> str:
-        """Применяет настройки из окна: сохраняет и перезапускает то, что нужно."""
         old = self.settings
         known = {f for f in Settings.__dataclass_fields__}
         merged = {**old.__dict__, **{k: v for k, v in values.items() if k in known}}
@@ -392,6 +395,8 @@ class Application:
 
         self.settings = new
         self.overlay.enabled = new.show_overlay
+        if not new.show_overlay:
+            self.overlay.stop()
 
         if new.hotkey != old.hotkey or new.mode != old.mode:
             try:
@@ -421,83 +426,44 @@ class Application:
                 log.warning("автозапуск не настроен: %s", exc)
                 return f"Сохранено, автозапуск не настроен: {exc}"
 
-        self.window.refresh_all()
         log.info("настройки сохранены")
         return "Сохранено"
 
-    # --- трей -------------------------------------------------------------
-    def _build_tray(self) -> TrayIcon:
-        icon_path = os.path.join(home_dir(), "tray.ico")
-        if not os.path.exists(icon_path):
-            if not make_icon_file(icon_path):
-                icon_path = ""
+    # --- окно и трей -------------------------------------------------------
+    def show_window(self, page: str | None = None) -> None:
+        self.window.show_window(page)
 
-        def items() -> list[tuple[str, object]]:
-            return [
-                ("Открыть окно", lambda: self.events.put(("window", None))),
-                ("Остановить диктовку" if self._recording else "Начать диктовку",
-                 lambda: self.events.put(("toggle", None))),
-                ("-", None),
-                ("Настройки", lambda: self.events.put(("settings", None))),
-                ("Открыть журнал", self._open_log),
-                ("Открыть папку моделей", self._open_models),
-                ("-", None),
-                ("Выход", lambda: self.events.put(("quit", None))),
-            ]
-
-        return TrayIcon(
-            APP_TITLE,
-            items,
-            on_default=lambda: self.events.put(("toggle", None)),
-            icon_path=icon_path,
-            log=log.warning,
-        )
-
-    def _open_log(self, *_args) -> None:
-        try:
-            os.startfile(log_path())  # noqa: S606
-        except OSError:
-            log.warning("не удалось открыть журнал")
-
-    def _open_models(self, *_args) -> None:
-        try:
-            os.startfile(self.settings.models_dir)  # noqa: S606
-        except OSError:
-            log.warning("не удалось открыть папку моделей")
-
-    def _show_control_window(self) -> None:
-        if self._control is not None:
-            return
-        try:
-            self._control = ControlWindow(
-                self.root,
-                on_toggle=lambda: self.events.put(("toggle", None)),
-                on_settings=lambda: self.events.put(("settings", None)),
-                on_quit=lambda: self.events.put(("quit", None)),
-            )
-            self.root.lift()
-        except Exception:  # noqa: BLE001
-            log.exception("не удалось показать резервное окно")
+    def toggle_window(self) -> None:
+        if self.window.isVisible() and not self.window.isMinimized():
+            self.window.hide()
+        else:
+            self.window.show_window()
 
     # --- жизненный цикл ---------------------------------------------------
-    def run(self) -> None:
+    def run(self) -> int:
         self.hotkey.start()
-        if not self.hotkey.is_running:
-            log.error("не удалось поставить хук клавиатуры")
-            self.overlay.error("не удалось перехватить горячую клавишу")
-        else:
+        if self.hotkey.is_running:
             log.info("горячая клавиша: %s (%s)", format_hotkey(self.settings.hotkey),
                      self.settings.mode)
+        else:
+            log.error("не удалось поставить хук клавиатуры")
+            self.overlay.error("не удалось перехватить горячую клавишу")
 
         threading.Thread(target=self._warmup, name="warmup", daemon=True).start()
 
+        if self.settings.autostart:
+            # путь к запускаемому файлу мог измениться — запись в реестре обновляем
+            try:
+                set_autostart(True)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("автозапуск не обновлён: %s", exc)
+
         if os.environ.get("PANTELA_NO_TRAY") != "1":
             try:
-                self._tray = self._build_tray()
-                if self._tray.start():
+                if self.tray.show():
                     log.info("значок в трее установлен")
                 else:
-                    log.warning("значок в трее не установился — включаю резервное окно")
+                    log.warning("трей недоступен — включаю резервное окно")
                     self._show_control_window()
             except Exception:  # noqa: BLE001
                 log.exception("трей недоступен")
@@ -505,19 +471,22 @@ class Application:
         else:
             log.info("трей отключён переменной PANTELA_NO_TRAY")
 
-        self.window.show()
-        self._pump_job = self.root.after(40, self._pump)
-        self.root.mainloop()
+        self.window.show_window()
+        return self.qapp.exec()
+
+    def _show_control_window(self) -> None:
+        if self._control is not None:
+            return
+        try:
+            self._control = ControlWindow(self)
+            self._control.show()
+        except Exception:  # noqa: BLE001
+            log.exception("не удалось показать резервное окно")
 
     def quit(self) -> None:
         log.info("выход")
-        self._stopping = True
-        if self._pump_job is not None:
-            try:
-                self.root.after_cancel(self._pump_job)
-            except tk.TclError:
-                pass
-            self._pump_job = None
+        self.quitting = True
+        self._timer.stop()
         try:
             self.recorder.cancel()
         except Exception:  # noqa: BLE001
@@ -526,27 +495,26 @@ class Application:
             self.hotkey.stop()
         except Exception:  # noqa: BLE001
             pass
-        if self._tray is not None:
-            try:
-                self._tray.stop()
-            except Exception:  # noqa: BLE001
-                pass
         try:
-            self.overlay.destroy()
+            self.overlay.stop()
+            self.overlay.close()
         except Exception:  # noqa: BLE001
             pass
         try:
-            self.window.destroy()
+            self.tray.icon.hide()
         except Exception:  # noqa: BLE001
             pass
         if self._control is not None:
-            self._control.destroy()
-        self.root.quit()
-        self.root.destroy()
+            self._control.close()
+        try:
+            self.window.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self.qapp.quit()
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
+    argv = list(sys.argv if argv is None else argv)
     verbose = "--verbose" in argv
     setup_logging(verbose)
 
@@ -560,22 +528,16 @@ def main(argv: list[str] | None = None) -> int:
     first, _handle = single_instance()
     if not first:
         log.info("приложение уже запущено")
-        try:
-            import ctypes
-
-            ctypes.windll.user32.MessageBoxW(
-                None, "Pantela Voice уже запущен — ищите значок в трее.", APP_TITLE, 0x40
-            )
-        except Exception:  # noqa: BLE001
-            pass
+        app = QtWidgets.QApplication(argv)
+        QtWidgets.QMessageBox.information(
+            None, APP_TITLE, "Гласограф уже запущен — ищите значок в трее.")
         return 0
 
     log.info("запуск, домашний каталог: %s", home_dir())
-    app = Application()
+    app = Application(argv)
     if quit_after > 0:
-        app.root.after(int(quit_after * 1000), app.quit)
-    app.run()
-    return 0
+        QtCore.QTimer.singleShot(int(quit_after * 1000), app.quit)
+    return app.run()
 
 
 if __name__ == "__main__":

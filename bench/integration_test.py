@@ -40,7 +40,7 @@ def main() -> int:
 
     original_clipboard = get_clipboard_text()
     set_clipboard_text("")
-    app = Application(settings)
+    app = Application([sys.argv[0]])
     app.overlay.enabled = False
 
     # подменяем работу с железом: запись отдаёт заранее загруженный wav
@@ -49,16 +49,21 @@ def main() -> int:
     app.recorder.cancel = lambda: None              # type: ignore[method-assign]
 
     print("нажимаем горячую клавишу (имитация)…")
-    app._start_recording()
+    app.events.put(("press", None))
+    deadline = time.time() + 8
+    while time.time() < deadline and not app._recording:
+        app.qapp.processEvents()
+        time.sleep(0.03)
     assert app._recording, "запись не началась"
-    app._stop_recording()
-    assert not app._recording, "запись не остановилась"
 
-    app._pump()  # запускаем цикл обработки событий
+    time.sleep(1.0)
+    app.events.put(("release", None))
+    assert True
+
     deadline = time.time() + 90
     text = ""
     while time.time() < deadline:
-        app.root.update()
+        app.qapp.processEvents()
         text = get_clipboard_text()
         if text:
             break

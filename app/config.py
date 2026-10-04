@@ -1,6 +1,6 @@
 """Настройки приложения и пути.
 
-По умолчанию всё личное хозяйство лежит в %APPDATA%\\PantelaVoice.
+По умолчанию всё личное хозяйство лежит в %APPDATA%\\Glasograf.
 Переменная окружения PANTELA_HOME переопределяет каталог (нужна для тестов
 внутри песочницы).
 """
@@ -9,18 +9,33 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 from dataclasses import asdict, dataclass, field
 
-APP_NAME = "PantelaVoice"
+APP_NAME = "Glasograf"
+APP_TITLE = "Гласограф"
+LEGACY_APP_NAME = "PantelaVoice"
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
+
+
+def _migrate_settings(old_dir: str, new_dir: str) -> None:
+    """Переносит настройки и историю из прежнего имени приложения."""
+    for name in ("settings.json", "history.jsonl"):
+        source = os.path.join(old_dir, name)
+        target = os.path.join(new_dir, name)
+        if os.path.exists(source) and not os.path.exists(target):
+            try:
+                shutil.copyfile(source, target)
+            except OSError:
+                pass
 
 
 def home_dir() -> str:
     """Каталог для настроек и журнала.
 
-    Пробуем по очереди: PANTELA_HOME, %APPDATA%\\PantelaVoice, папку рядом с
+    Пробуем по очереди: PANTELA_HOME, %APPDATA%\\Glasograf, папку рядом с
     программой, системный временный каталог. Первый доступный и выигрывает —
     приложение не должно падать из-за прав на запись.
     """
@@ -40,6 +55,9 @@ def home_dir() -> str:
             with open(probe, "w", encoding="utf-8") as fh:
                 fh.write("ok")
             os.remove(probe)
+            old = os.path.join(base, LEGACY_APP_NAME)
+            if os.path.isdir(old) and os.path.abspath(old) != os.path.abspath(path):
+                _migrate_settings(old, path)
             return path
         except OSError:
             continue
@@ -51,7 +69,7 @@ def settings_path() -> str:
 
 
 def log_path() -> str:
-    return os.path.join(home_dir(), "pantela.log")
+    return os.path.join(home_dir(), "glasograf.log")
 
 
 @dataclass

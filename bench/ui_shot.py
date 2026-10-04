@@ -1,10 +1,7 @@
-"""Снимки интерфейса: индикатор диктовки и четыре вкладки главного окна.
+"""Снимки интерфейса «Гласографа»: индикатор диктовки и четыре раздела окна.
 
-Важно: используется единственный `Tk()` — тот, что создаёт само приложение.
-Второй экземпляр Tk в одном процессе уводит StringVar в другой интерпретатор
-Tcl, и поля выглядят пустыми (это ломает только тесты, не приложение).
-
-Результат — PNG в bench/shots.
+Окна настоящие, поэтому снимаем область экрана: так видно то же, что видит
+пользователь, включая скругления и прозрачность.
 """
 
 from __future__ import annotations
@@ -21,9 +18,8 @@ for _p in (os.path.join(ROOT, "pylibs"), ROOT):
 os.environ.setdefault("PANTELA_HOME", os.path.join(ROOT, "testhome"))
 os.environ["PANTELA_NO_TRAY"] = "1"
 
-from PIL import ImageGrab  # noqa: E402
+from PySide6 import QtCore, QtGui  # noqa: E402
 
-from app.config import Settings  # noqa: E402
 from app.main import Application  # noqa: E402
 
 SHOTS = os.path.join(ROOT, "bench", "shots")
@@ -38,28 +34,32 @@ DEMO = [
 ]
 
 
-def pump(root, seconds: float = 0.4) -> None:  # noqa: ANN001
+def pump(app, seconds: float = 0.5) -> None:  # noqa: ANN001
     end = time.time() + seconds
     while time.time() < end:
-        root.update()
+        app.qapp.processEvents()
         time.sleep(0.03)
 
 
-def grab(root, widget, name: str, pad: int = 10) -> None:  # noqa: ANN001
-    pump(root, 0.4)
-    widget.update_idletasks()
-    x, y = widget.winfo_rootx(), widget.winfo_rooty()
-    image = ImageGrab.grab((x - pad, y - pad, x + widget.winfo_width() + pad,
-                            y + widget.winfo_height() + pad))
-    image.save(os.path.join(SHOTS, name))
-    print(f"{name}: {image.size[0]}x{image.size[1]}")
+def grab_widget(app, widget, name: str, background: str | None = None) -> None:  # noqa: ANN001
+    """Снимаем сам виджет: так на картинку не попадут чужие окна поверх."""
+    pump(app, 0.5)
+    pixmap = widget.grab()
+    if background:
+        canvas = QtGui.QPixmap(pixmap.size())
+        canvas.fill(QtGui.QColor(background))
+        painter = QtGui.QPainter(canvas)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.end()
+        pixmap = canvas
+    path = os.path.join(SHOTS, name)
+    pixmap.save(path)
+    print(f"{name}: {pixmap.width()}x{pixmap.height()}")
 
 
 def main() -> int:
     os.makedirs(SHOTS, exist_ok=True)
-
-    app = Application(Settings(show_overlay=True, play_sound=False))
-    root = app.root
+    app = Application([sys.argv[0]])
     app.overlay.enabled = True
 
     app.history.clear()
@@ -68,29 +68,31 @@ def main() -> int:
         app.history.add(text, seconds, "parakeet")
         app.history._entries[-1].ts = now - index * 3600 - 1800
     app.history.rewrite()
+    app.window.refresh_all()
 
     overlay = app.overlay
     overlay.recording(0.35)
     for level in (0.25, 0.6, 0.85, 0.4, 0.7, 0.3, 0.65, 0.45):
         overlay.set_level(level)
-        pump(root, 0.05)
-    grab(root, overlay.win, "overlay_recording.png")
+        pump(app, 0.06)
+    grab_widget(app, overlay, background="#33333a", name="overlay_recording.png")
 
     overlay.set_level(0.9)
     overlay.working("1.4 с")
-    grab(root, overlay.win, "overlay_working.png")
+    grab_widget(app, overlay, background="#33333a", name="overlay_working.png")
 
     overlay.done("Так, теперь пошла настоящая проверка")
-    grab(root, overlay.win, "overlay_done.png")
-    overlay.hide()
+    grab_widget(app, overlay, background="#33333a", name="overlay_done.png")
+    overlay.stop()
 
     window = app.window
-    window.show()
+    window.show_window()
     window.set_status("Текст вставлен в активное окно · 9 сл.", "#7cc47f")
-    for tab in ("home", "summary", "settings", "help"):
-        window.show_tab(tab)
-        window.refresh_all()
-        grab(root, window.win, f"window_{tab}.png", pad=0)
+    for key, name in (("home", "window_home.png"), ("summary", "window_summary.png"),
+                      ("settings", "window_settings.png"), ("help", "window_help.png")):
+        window.show_page(key)
+        pump(app, 0.4)
+        grab_widget(app, window, name)
 
     app.quit()
     print("готово:", SHOTS)

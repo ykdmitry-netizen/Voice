@@ -97,15 +97,20 @@ def t_devices() -> str:
 
 
 def t_engine() -> str:
-    from app import asr
+    from app import asr, models
     from app.config import Settings
+
+    s = Settings()
+    engine = asr.build_engine(s.engine, s.models_dir, s.whisper_model)
+    missing = engine.missing_files() if not engine.needs_hf_download else []
+    if missing:
+        return ("пропущено: модели нет — запустите setup_env.bat или "
+                "bench/download_models.py parakeet")
 
     sample_path = os.path.join(ROOT, "audio", "ru_real.wav")
     if not os.path.exists(sample_path):
         return "пропущено: нет тестового аудио — запустите bench/download_demo_audio.py"
 
-    s = Settings()
-    engine = asr.build_engine(s.engine, s.models_dir, s.whisper_model)
     engine.load()
     sys.path.insert(0, os.path.join(ROOT, "bench"))
     from audio_io import load  # noqa: PLC0415

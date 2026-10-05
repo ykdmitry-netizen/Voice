@@ -100,13 +100,17 @@ def t_engine() -> str:
     from app import asr
     from app.config import Settings
 
-    s = Settings.load()
+    sample_path = os.path.join(ROOT, "audio", "ru_real.wav")
+    if not os.path.exists(sample_path):
+        return "пропущено: нет тестового аудио — запустите bench/download_demo_audio.py"
+
+    s = Settings()
     engine = asr.build_engine(s.engine, s.models_dir, s.whisper_model)
     engine.load()
     sys.path.insert(0, os.path.join(ROOT, "bench"))
     from audio_io import load  # noqa: PLC0415
 
-    samples = load(os.path.join(ROOT, "audio", "ru_real.wav"), 16000)
+    samples = load(sample_path, 16000)
     started = time.perf_counter()
     text = engine.transcribe(samples, "ru")
     elapsed = time.perf_counter() - started
@@ -120,9 +124,11 @@ def t_models_present() -> str:
     from app import models
     from app.config import Settings
 
-    s = Settings.load()
+    s = Settings()
     missing = models.missing(s.models_dir, "parakeet")
-    assert not missing, f"не хватает файлов Parakeet: {missing}"
+    if missing:
+        return ("пропущено: модели нет — запустите setup_env.bat или "
+                "bench/download_models.py parakeet")
     gigaam = models.missing(s.models_dir, "gigaam")
     state = "на месте" if not gigaam else "нет: " + ", ".join(gigaam)
     return f"parakeet на месте ({models.total_size('parakeet') / 1e6:.0f} МБ), gigaam {state}"

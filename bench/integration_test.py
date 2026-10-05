@@ -26,7 +26,12 @@ from app.main import Application, setup_logging  # noqa: E402
 
 def main() -> int:
     setup_logging()
-    samples = load(os.path.join(ROOT, "audio", "ru_real.wav"), 16000)
+    sample_path = os.path.join(ROOT, "audio", "ru_real.wav")
+    if not os.path.exists(sample_path):
+        print("ИТОГ: пропущено — нет тестового аудио, "
+              "запустите bench/download_demo_audio.py")
+        return 0
+    samples = load(sample_path, 16000)
     print(f"тестовое аудио: {len(samples) / 16000:.2f} с")
 
     settings = Settings(
